@@ -1,0 +1,69 @@
+function decodeUplink(input) {
+    var decoded = {
+        temp: 0,
+        humi: 0
+    };
+    var bytes = input['bytes'];
+    bytes = bytes2HexString(bytes);
+
+    decoded.temp = parseInt(bytes.slice(0, 4), 16) / 100;
+    decoded.humi = parseInt(bytes.slice(-4), 16) / 100;
+
+    let messages = [
+        {
+            type: 'temp',
+            measurementId: 4097,
+            measurementValue: decoded.temp
+        },
+        {
+            type: 'humi',
+            measurementId: 4098,
+            measurementValue: decoded.humi
+        }
+    ];
+
+    var result = {};
+    result.messages = messages;
+    return { data: result };
+}
+
+    /**
+   * Convert to an 8-digit binary number with 0s in front of the number
+   * @param arr
+   * @returns {string}
+   */
+  function toBinary (arr) {
+    let binaryData = arr.map((item) => {
+      let data = parseInt(item, 16)
+        .toString(2)
+      let dataLength = data.length
+      if (data.length !== 8) {
+        for (let i = 0; i < 8 - dataLength; i++) {
+          data = `0` + data
+        }
+      }
+      return data
+    })
+    let ret = binaryData.toString()
+      .replace(/,/g, '')
+    return ret
+  }
+  
+  
+  function bytes2HexString (arrBytes) {
+    var str = ''
+    for (var i = 0; i < arrBytes.length; i++) {
+      var tmp
+      var num = arrBytes[i]
+      if (num < 0) {
+        tmp = (255 + num + 1).toString(16)
+      } else {
+        tmp = num.toString(16)
+      }
+      if (tmp.length === 1) {
+        tmp = '0' + tmp
+      }
+      str += tmp
+    }
+    return str
+  }
