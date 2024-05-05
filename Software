@@ -1,0 +1,198 @@
+# include <Arduino.h>
+# include <SoftwareSerial.h>
+#include "Wire.h"
+#include "DHT.h"
+
+#define DHTTYPE DHT20   // DHT 20
+DHT dht(DHTTYPE);         //   DHT10 DHT20 don't need to define Pin
+
+static char recv_buf[512];
+static bool is_exist = false;
+static bool is_join = false;
+static int led = 0;
+
+int temp = 1;
+int humi = 56;
+
+SoftwareSerial mySerial(2, 7); // Rx, Tx
+
+
+static int at_send_check_response(char *p_ack, int timeout_ms, char*p_cmd, ...)
+{
+    int ch;
+    int num = 0;
+    int index = 0;
+    int startMillis = 0;
+    va_list args;
+    char cmd_buffer[256];  // Adjust the buffer size as needed
+    memset(recv_buf, 0, sizeof(recv_buf));
+    va_start(args, p_cmd);
+    vsprintf(cmd_buffer, p_cmd, args);  // Format the command string
+    mySerial.print(cmd_buffer);
+    Serial.print(cmd_buffer);
+    va_end(args);
+    delay(50);
+    startMillis = millis();
+
+
+    if (p_ack == NULL)
+    {
+        Serial.println("p_ack none");
+        return 0;
+    }
+
+    do
+    {
+        while (mySerial.available() > 0)
+        {
+            ch = mySerial.read();
+            recv_buf[index++] = ch;
+            Serial.print((char)ch);
+            delay(2);
+        }
+
+        if (strstr(recv_buf, p_ack) != NULL)
+        {
+            return 1;
+        }
+
+    } while (millis() - startMillis < timeout_ms);
+    return 0;
+}
+
+static void recv_prase(char *p_msg)
+{
+    if (p_msg == NULL)
+    {
+        return;
+    }
+char*p_start = NULL;
+    int data = 0;
+    int rssi = 0;
+    int snr = 0;
+
+    p_start = strstr(p_msg, "RX");
+    if (p_start && (1 == sscanf(p_start, "RX: \"%d\"\r\n", &data)))
+    {
+        Serial.println(data);
+        Serial.print("led :");
+        led = !!data;
+        Serial.print(led);
+        if (led)
+        {
+            digitalWrite(LED_BUILTIN, LOW);
+        }
+        else
+        {
+            digitalWrite(LED_BUILTIN, HIGH);
+        }
+    }
+
+    p_start = strstr(p_msg, "RSSI");
+    if (p_start && (1 == sscanf(p_start, "RSSI %d,", &rssi)))
+    {
+        Serial.print("rssi:");
+        Serial.print(rssi);
+    }
+    p_start = strstr(p_msg, "SNR");
+    if (p_start && (1 == sscanf(p_start, "SNR %d", &snr)))
+    {
+        Serial.print("snr :");
+        Serial.print(snr);
+    }
+}
+
+void setup() {
+  Serial.begin(115200); // 初始化串口通信
+  Wire.begin();
+  dht.begin();
+  if (!mySerial.begin(9600, SERIAL_8N1)) {
+        Serial.println("Failed to init soft serial");
+        while (1);
+    }
+
+  if (at_send_check_response("+AT: OK", 200, "AT\r\n"))
+{
+    is_exist = true;
+    
+    // 发送 AT+ID 命令
+    if (at_send_check_response("+ID:", 1000, "AT+ID\r\n")) {
+        // 命令成功发送并且收到响应
+        // 可以在 recv_buf 中找到返回的数据
+        Serial.print("Received ID data: ");
+        Serial.println(recv_buf);
+    } else {
+        // 命令发送失败或者没有收到响应
+        Serial.println("Failed to get ID data.");
+    }
+
+    // 其他设置命令
+    at_send_check_response("+MODE: LWOTAA", 1000, "AT+MODE=LWOTAA\r\n");
+    at_send_check_response("+DR: EU868", 1000, "AT+DR=EU868\r\n");
+    at_send_check_response("+CH: NUM", 1000, "AT+CH=NUM,0-2\r\n");
+    at_send_check_response("+KEY: APPKEY", 1000, "AT+KEY=APPKEY,\"2B7E151628AED2A6ABF7158809CF4F3D\"\r\n");
+    at_send_check_response("+CLASS: C", 1000, "AT+CLASS=A\r\n");
+    at_send_check_response("+PORT: 8", 1000, "AT+PORT=8\r\n");
+    
+    delay(200);
+    is_join = true;
+}
+else
+{
+    is_exist = false;
+    Serial.print("No E5 module found.\r\n");
+}
+}
+
+
+void loop() {
+    float temp_hum_val[2] = {0};
+    if(is_exist)
+    {
+        Serial.println("success");
+        delay(1000);
+    }
+
+    if (is_exist)
+        {
+            int ret = 0;
+            if (is_join)
+            {
+
+                ret = at_send_check_response("+JOIN: Network joined", 12000, "AT+JOIN\r\n");
+                if (ret)
+                {
+                    is_join = false;
+                }
+                else
+                {
+                    at_send_check_response("+ID: AppEui", 1000, "AT+ID\r\n");
+                    Serial.print("JOIN failed!\r\n\r\n");
+                    delay(5000);
+                }
+            }
+            else
+            {
+              if (!dht.readTempAndHumidity(temp_hum_val)) {
+                char cmd[128];
+                sprintf(cmd, "AT+CMSGHEX=\"%04X%04X\"\r\n", int(temp_hum_val[1]*100), int(temp_hum_val[0]*100));
+                Serial.print(temp_hum_val[0]);
+                Serial.println(temp_hum_val[1]);
+                ret = at_send_check_response("Done", 5000, cmd);
+                if (ret)
+                {
+                    recv_prase(recv_buf);
+                }
+                else
+                {
+                    Serial.print("Send failed!\r\n\r\n");
+                }
+              }
+                delay(30000);
+            }
+        }
+        else
+        {
+            delay(1000);
+        }
+}
